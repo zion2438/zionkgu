@@ -13,10 +13,13 @@ def initialize(raw):
     wb.close()
     sheets = list(book)
     base = book['국산투입계수(Ad)']
-    codes = [str(c) for c in base[4][2:] if c is not None and str(c).isdigit() and int(str(c)) < 9000]
-    if len(codes) != 380 or len(set(codes)) != len(codes):
-        raise ValueError('이 버전은 첨부된 2023년 380부문 워크북 구조만 지원합니다.')
-    nm = {str(r[0]): str(r[1]) for r in base[6:]}
+    header = [str(c) for c in base[4][2:]]
+    if '9090' not in header:
+        raise ValueError('중간투입 합계 열(9090)을 찾을 수 없습니다.')
+    codes = header[:header.index('9090')]
+    nm = {str(r[0]): str(r[1]) for r in base[6:] if len(r)>1 and r[0] is not None and r[1] is not None}
+    if not codes or len(set(codes)) != len(codes) or any(c not in nm for c in codes):
+        raise ValueError('산업 코드와 행 구성이 일치하지 않습니다.')
     names = [nm[c] for c in codes]
     def matrix(s):
         rows = book[s]

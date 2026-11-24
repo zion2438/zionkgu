@@ -9,6 +9,10 @@ function invalidate(){result=null;$('results').hidden=true;}
 async function load(buffer){
  invalidate();basket=[];renderBasket();
  resetRanking();
+ $('cells').replaceChildren();
+ $('unit').textContent='';
+ $('explore-caption').textContent='자료를 불러온 후 표시됩니다.';
+ $('validation').textContent='계수 검증 대기 중';
  for(const id of ['sheet','row','sector','add','run','row-search','col-search','sector-search','amount'])$(id).disabled=true;
  if(worker)worker.terminate();for(const p of requests.values())p.reject(Error('데이터 다시 로드'));requests.clear();startWorker();
  try{const info=await call('init',buffer);sectors=info.sectors;options($('sector'),sectors);$('sector-search').value='';$('row-search').value='';$('col-search').value='';$('sheet').replaceChildren(...info.sheets.map(s=>{const o=text('option',s);o.value=s;return o;}));
@@ -35,27 +39,25 @@ function renderResult(){$('results').hidden=false;$('cards').replaceChildren(...
 function csvCell(v){let s=String(v);if(/^[=+@-]/.test(s)&&typeof v!=='number')s="'"+s;return '"'+s.replaceAll('"','""')+'"';}
 $('download').onclick=()=>{if(!result)return;const rows=[['산업코드','산업명','생산유발액_백만원','수입유발액_백만원','부가가치유발액_백만원'],...result.rows.map(r=>[r.code,r.name,r.production,r.imports,r.valueAdded])];const url=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='io-2023-results.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 
-async function loadDefaultWorkbook(){
- try {
-  $('status').textContent='기본 Excel 내려받는 중…';
-  const response=await fetch('./data/io-2023.xlsx');
-  if(!response.ok)throw Error('기본 Excel 다운로드 실패 (HTTP '+response.status+')');
-  await load(await response.arrayBuffer());
- }catch(error){
-  $('status').textContent='준비 실패: '+error.message+' — 연결 상태를 확인하고 새로고침하세요.';
- }
-}
+const workbookFiles={basic:'io-2023.xlsx',large:'io-2023-large.xlsx',medium:'io-2023-medium.xlsx',small:'io-2023-small.xlsx'};
 $('load-basic').onclick=async()=>{
- const button=$('load-basic');
- button.disabled=true;
+ const button=$('load-basic'), select=$('classification');
+ const label=select.options[select.selectedIndex].textContent;
+ button.disabled=select.disabled=true;
  button.textContent='불러오는 중…';
  try {
-  await loadDefaultWorkbook();
-  const ready=!$('sheet').disabled;
-  button.textContent=ready?'기본부문 불러오기 완료':'기본부문 다시 불러오기';
-  button.disabled=ready;
+  $('status').textContent=label+' Excel 내려받는 중…';
+  const response=await fetch('./data/'+workbookFiles[select.value]);
+  if(!response.ok)throw Error('Excel 다운로드 실패 (HTTP '+response.status+')');
+  const buffer=await response.arrayBuffer();
+  $('active-class').textContent='현재 분석 자료: 없음';
+  await load(buffer);
+  if(!$('sheet').disabled)$('active-class').textContent='현재 분석 자료: '+label+' · '+sectors.length+'개 부문';
+ }catch(error){
+  $('status').textContent='자료 불러오기 실패: '+error.message;
  }finally{
-  if($('sheet').disabled){button.disabled=false;button.textContent='기본부문 다시 불러오기';}
+  button.disabled=select.disabled=false;
+  button.textContent='선택한 분류 불러오기';
  }
 };
 
@@ -78,7 +80,7 @@ function renderRanking(){
     for(const value of [r.rank,r.code,r.name,fmt(r.multiplier),fmt(r.multiplier*100)]) tr.append(text('td',value));
     return tr;
   }));
-  $('rank-status').textContent=query ? `검색 결과 ${shown.length}개 · 전체 순위 기준` : `기본부문 ${ranking.length}개 중 상위 ${shown.length}개`;
+  $('rank-status').textContent=query ? `검색 결과 ${shown.length}개 · 전체 순위 기준` : `현재 분류 ${ranking.length}개 중 상위 ${shown.length}개`;
 }
 $('rank-search').oninput=renderRanking;
 $('rank-run').onclick=async()=>{
