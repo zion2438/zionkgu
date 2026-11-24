@@ -5,9 +5,9 @@ function text(tag,value){const e=document.createElement(tag);e.textContent=value
 function call(type,payload){return new Promise((resolve,reject)=>{const id=++nextId;requests.set(id,{resolve,reject});worker.postMessage({id,type,payload});});}
 function startWorker(){worker=new Worker('./worker.js');worker.onmessage=({data:d})=>{if(d.type==='status'){$('status').textContent=d.text;return;}const p=requests.get(d.id);if(!p)return;requests.delete(d.id);d.ok?p.resolve(d.result):p.reject(Error(d.error));};worker.onerror=e=>{for(const p of requests.values())p.reject(Error(e.message||'Worker 실행 오류'));requests.clear();};}
 function options(el,list){el.replaceChildren(...list.map(x=>{const o=document.createElement('option');o.value=x.code;o.textContent=x.code+' '+x.name;return o;}));}
-function invalidate(){result=null;$('results').hidden=true;}
+function invalidate(){result=null;currentScenario=null;$('results').hidden=true;renderComparison();}
 async function load(buffer){
- invalidate();basket=[];renderBasket();
+ savedA=null;invalidate();basket=[];renderBasket();
  resetRanking();
  $('cells').replaceChildren();
  $('unit').textContent='';
@@ -34,7 +34,7 @@ $('sector-search').oninput=()=>{const q=$('sector-search').value.trim();options(
 function renderBasket(){$('basket').replaceChildren(...basket.map((s,i)=>{const li=text('li',s.code+' '+s.name+' / '+fmt(s.amount)+'백만원 ');const b=text('button','삭제');b.type='button';b.onclick=()=>{basket.splice(i,1);invalidate();renderBasket();};li.append(b);return li;}));$('sim-status').textContent=basket.length?basket.length+'개 입력 준비. 계산 버튼을 누르세요.':'시나리오를 추가하세요.';}
 $('scenario').onsubmit=e=>{e.preventDefault();const amount=Number($('amount').value),s=sectors.find(s=>s.code===$('sector').value);if(!s||!Number.isFinite(amount)||amount<=0){$('sim-status').textContent='산업과 양의 증가액을 확인하세요.';return;}basket.push({...s,amount});invalidate();renderBasket();};
 $('clear').onclick=()=>{basket=[];invalidate();renderBasket();};
-$('run').onclick=async()=>{if(!basket.length){$('sim-status').textContent='시나리오를 먼저 추가하세요.';return;}const snapshot=basket.map(s=>({...s}));$('run').disabled=true;$('sim-status').textContent='계산 중…';try{const r=await call('simulate',snapshot);if(JSON.stringify(snapshot)!==JSON.stringify(basket)){$('sim-status').textContent='입력이 변경되었습니다. 다시 계산하세요.';return;}result=r;renderResult();$('sim-status').textContent='계산 완료. 아래 결과는 현재 시나리오에 대응합니다.';}catch(e){invalidate();$('sim-status').textContent='계산 실패: '+e.message;}finally{$('run').disabled=false;}};
+$('run').onclick=async()=>{if(!basket.length){$('sim-status').textContent='시나리오를 먼저 추가하세요.';return;}const activeWorker=worker;const snapshot=basket.map(s=>({...s}));$('run').disabled=true;$('sim-status').textContent='계산 중…';try{const r=await call('simulate',snapshot);if(worker!==activeWorker)return;if(JSON.stringify(snapshot)!==JSON.stringify(basket)){$('sim-status').textContent='입력이 변경되었습니다. 다시 계산하세요.';return;}result=r;currentScenario={metrics:r,inputs:snapshot};renderResult();renderComparison();$('sim-status').textContent='계산 완료. 아래 결과는 현재 시나리오에 대응합니다.';}catch(e){if(worker===activeWorker){invalidate();$('sim-status').textContent='계산 실패: '+e.message;}}finally{if(worker===activeWorker)$('run').disabled=false;}};
 function renderResult(){$('results').hidden=false;$('cards').replaceChildren(...[['수요 증가액',result.demand],['생산유발액',result.production],['수입유발액',result.imports],['부가가치유발액',result.valueAdded]].map(([title,v])=>{const d=text('div',title);d.className='card';d.append(text('strong',fmt(v)),text('span','백만원'));return d;}));const max=Math.max(...result.rows.map(r=>r.production),1);$('bars').replaceChildren(...result.rows.slice(0,15).map(r=>{const d=text('div',r.name+' · '+fmt(r.production)+'백만원');d.className='bar';const t=document.createElement('div');t.className='track';const f=document.createElement('div');f.className='fill';f.style.width=Math.max(0,r.production/max*100)+'%';t.append(f);d.append(t);return d;}));$('result-rows').replaceChildren(...result.rows.map(r=>{const tr=document.createElement('tr');[r.code,r.name,fmt(r.production),fmt(r.imports),fmt(r.valueAdded)].forEach(v=>tr.append(text('td',v)));return tr;}));}
 function csvCell(v){let s=String(v);if(/^[=+@-]/.test(s)&&typeof v!=='number')s="'"+s;return '"'+s.replaceAll('"','""')+'"';}
 $('download').onclick=()=>{if(!result)return;const rows=[['산업코드','산업명','생산유발액_백만원','수입유발액_백만원','부가가치유발액_백만원'],...result.rows.map(r=>[r.code,r.name,r.production,r.imports,r.valueAdded])];const url=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='io-2023-results.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
@@ -99,3 +99,32 @@ $('rank-run').onclick=async()=>{
     if(worker===active)$('rank-run').disabled=false;
   }
 };
+
+let savedA=null, currentScenario=null;
+const comparisonMetrics=[['demand','최종수요 증가액'],['production','생산유발액'],['valueAdded','부가가치유발액'],['imports','수입유발액']];
+function describeScenario(s){return s.inputs.map(i=>i.name+' '+fmt(i.amount)+'백만원').join(' + ');}
+function renderComparison(){
+  const b=currentScenario!==savedA ? currentScenario : null;
+  $('save-a').disabled=!currentScenario||currentScenario===savedA;
+  $('clear-a').disabled=!savedA;
+  $('compare-a').textContent=savedA?'A안: '+describeScenario(savedA):'';
+  $('compare-b').textContent=savedA&&b?'B안: '+describeScenario(b):'';
+  $('compare-table').hidden=!(savedA&&b);
+  if(!savedA||!b){
+    $('compare-rows').replaceChildren();
+    $('compare-status').textContent=savedA?'A안 저장됨. 입력을 바꾸고 파급효과를 다시 계산하면 B안이 표시됩니다.':'먼저 시뮬레이션 결과를 A안으로 저장하세요.';
+    return;
+  }
+  const equal=Math.abs(savedA.metrics.demand-b.metrics.demand)<1e-8;
+  $('compare-status').textContent=equal?'A안과 B안의 총 최종수요 증가액이 같습니다.':'두 안의 총 최종수요 증가액이 다릅니다. 배분 효과만 비교하려면 총 증가액을 같게 맞추세요.';
+  $('compare-rows').replaceChildren(...comparisonMetrics.map(([key,label])=>{
+    const tr=document.createElement('tr');
+    const heading=text('th',label);heading.scope='row';tr.append(heading);
+    const a=savedA.metrics[key], value=b.metrics[key], delta=value-a;
+    const formatted=Math.abs(delta)<0.0005?'0':(delta>0?'+':'')+fmt(delta);
+    for(const v of [fmt(a),fmt(value),formatted])tr.append(text('td',v));
+    return tr;
+  }));
+}
+$('save-a').onclick=()=>{if(currentScenario){savedA=currentScenario;renderComparison();}};
+$('clear-a').onclick=()=>{savedA=null;renderComparison();};
