@@ -67,3 +67,12 @@ def simulate(payload):
     result.sort(key=lambda r:r['production'],reverse=True)
     return emit({'demand':float(f.sum()),'production':float(x.sum()),'imports':float(m.sum()),
                  'valueAdded':float(v.sum()),'multiplier':float(x.sum()/f.sum()),'rows':result})
+
+
+def production_ranking():
+    if not valid:
+        raise ValueError('검증된 데이터가 없습니다.')
+    rows = [{'code': c, 'name': n, 'multiplier': float(m)}
+            for c, n, m in zip(codes, names, L.sum(axis=0))]
+    rows.sort(key=lambda r: (-r['multiplier'], r['code']))
+    return emit(rows)

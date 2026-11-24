@@ -8,11 +8,14 @@ function options(el,list){el.replaceChildren(...list.map(x=>{const o=document.cr
 function invalidate(){result=null;$('results').hidden=true;}
 async function load(buffer){
  invalidate();basket=[];renderBasket();
+ resetRanking();
  for(const id of ['sheet','row','sector','add','run','row-search','col-search','sector-search','amount'])$(id).disabled=true;
  if(worker)worker.terminate();for(const p of requests.values())p.reject(Error('데이터 다시 로드'));requests.clear();startWorker();
  try{const info=await call('init',buffer);sectors=info.sectors;options($('sector'),sectors);$('sector-search').value='';$('row-search').value='';$('col-search').value='';$('sheet').replaceChildren(...info.sheets.map(s=>{const o=text('option',s);o.value=s;return o;}));
  $('validation').textContent=JSON.stringify(info.residuals,null,2)+'\n최대 절대 잔차: 허용값 1e-8 미만';
  for(const id of ['sheet','row','sector','add','run','row-search','col-search','sector-search','amount'])$(id).disabled=false;
+ $('rank-run').disabled=false;
+ $('rank-status').textContent='순위 계산 버튼을 눌러 비교하세요.';
  await explore();$('status').textContent='준비 완료 · '+sectors.length+'개 부문 · '+info.sheets.length+'개 시트 · 계수 검증 통과';
  }catch(e){$('status').textContent='준비 실패: '+e.message+' — 새로고침 후 재시도하세요.';}
 }
@@ -54,4 +57,43 @@ $('load-basic').onclick=async()=>{
  }finally{
   if($('sheet').disabled){button.disabled=false;button.textContent='기본부문 다시 불러오기';}
  }
+};
+
+let ranking=[];
+function resetRanking(){
+  ranking=[];
+  $('rank-run').disabled=true;
+  $('rank-search').disabled=true;
+  $('rank-search').value='';
+  $('rank-table').hidden=true;
+  $('rank-status').textContent='자료를 불러오는 중입니다.';
+}
+function renderRanking(){
+  const query=$('rank-search').value.trim().toLowerCase();
+  const ranked=ranking.map((r,i)=>({...r,rank:i+1}));
+  const shown=query ? ranked.filter(r=>(r.code+' '+r.name).toLowerCase().includes(query)) : ranked.slice(0,10);
+  $('rank-table').hidden=!shown.length;
+  $('rank-rows').replaceChildren(...shown.map(r=>{
+    const tr=document.createElement('tr');
+    for(const value of [r.rank,r.code,r.name,fmt(r.multiplier),fmt(r.multiplier*100)]) tr.append(text('td',value));
+    return tr;
+  }));
+  $('rank-status').textContent=query ? `검색 결과 ${shown.length}개 · 전체 순위 기준` : `기본부문 ${ranking.length}개 중 상위 ${shown.length}개`;
+}
+$('rank-search').oninput=renderRanking;
+$('rank-run').onclick=async()=>{
+  const active=worker;
+  $('rank-run').disabled=true;
+  $('rank-status').textContent='순위 계산 중…';
+  try{
+    const rows=await call('ranking');
+    if(worker!==active)return;
+    ranking=rows;
+    $('rank-search').disabled=false;
+    renderRanking();
+  }catch(e){
+    if(worker===active)$('rank-status').textContent='순위 계산 실패: '+e.message;
+  }finally{
+    if(worker===active)$('rank-run').disabled=false;
+  }
 };

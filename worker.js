@@ -22,6 +22,8 @@ async function handle({id,type,payload}) {
       py.globals.set('sheet_input',payload.sheet);
       py.globals.set('row_input',payload.row||'');
       result=py.runPython('explore(sheet_input, row_input)');
+    } else if(type==='ranking') {
+      result=py.runPython('production_ranking()');
     } else {
       py.globals.set('scenario_input',JSON.stringify(payload));
       result=py.runPython('simulate(scenario_input)');
